@@ -1,0 +1,25 @@
+name: ▶️ Start Clover Poller
+
+on:
+  schedule:
+    - cron: '0 13 * * *'  # 13:00 UTC = 09:00 EDT
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Railway Login
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway login --ci
+
+      - name: Link to Railway Project
+        run: railway link --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
+
+      - name: Deploy latest code
+        run: railway up --yes

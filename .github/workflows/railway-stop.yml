@@ -1,0 +1,25 @@
+name: ⏸️ Stop Clover Poller
+
+on:
+  schedule:
+    - cron: '1 5 * * *'   # 05:01 UTC = 01:01 EDT
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Railway Login
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway login --ci
+
+      - name: Link to Railway Project
+        run: railway link --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
+
+      - name: Stop service
+        run: railway down
