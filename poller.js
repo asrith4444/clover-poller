@@ -1,8 +1,8 @@
 // poller.js
-require('dotenv').config();
-const fetch       = require('node-fetch');      // v2.x
-const Pusher      = require('pusher');
-const { MongoClient } = require('mongodb');
+require('dotenv').config()
+const fetch          = require('node-fetch')        // v2.x
+const Pusher         = require('pusher')
+const { MongoClient } = require('mongodb')
 
 // ── Env & Validation ──────────────────────────────────────────────────────────
 const {
@@ -15,7 +15,7 @@ const {
   PUSHER_KEY,
   PUSHER_SECRET,
   PUSHER_CLUSTER
-} = process.env;
+} = process.env
 
 if (
   !CLOVER_ACCESS_TOKEN ||
@@ -27,8 +27,8 @@ if (
   !PUSHER_SECRET       ||
   !PUSHER_CLUSTER
 ) {
-  console.error('❌ Missing required environment variables. Check your .env file.');
-  process.exit(1);
+  console.error('❌  Missing required environment variables. Check your .env file.')
+  process.exit(1)
 }
 
 // ── Pusher & MongoDB Setup ─────────────────────────────────────────────────────
@@ -38,84 +38,88 @@ const pusher = new Pusher({
   secret:  PUSHER_SECRET,
   cluster: PUSHER_CLUSTER,
   useTLS:  true
-});
+})
 
 const mongoClient = new MongoClient(MONGODB_URI, {
   useNewUrlParser:    true,
   useUnifiedTopology: true
-});
+})
 
-let db;
+let db
 async function initDb() {
-  await mongoClient.connect();
-  db = mongoClient.db(MONGODB_DB);
-  console.log('✅ Connected to MongoDB (ikds collection)');
+  await mongoClient.connect()
+  db = mongoClient.db(MONGODB_DB)
+  console.log('✅  Connected to MongoDB (ikds collection)')
 }
 
 // ── In‐memory Dedupe & Polling ────────────────────────────────────────────────
-// Track which orders we’ve already emitted to avoid duplicates
-const seenOrders = new Set();
+// Track which orders we’ve fully processed
+const seenOrders = new Set()
 
 async function pollOnce() {
-  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-  const limit       = 100;
-  let offset        = 0;
-  let anyNew        = false;
+  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000
+  const limit       = 100
+  let offset        = 0
+  let anyNew        = false
 
   try {
     while (true) {
-      // 1) Fetch a page of orders, expanding all lineItems
+      // Fetch a page of orders, expanding both the container and each item’s details
       const url =
         `${CLOVER_BASE_URL}/v3/merchants/${CLOVER_MERCHANT_ID}/orders` +
-        `?expand=lineItems&limit=${limit}&offset=${offset}`;
+        `?expand=lineItems%2ClineItems.item&limit=${limit}&offset=${offset}`
 
       const resp = await fetch(url, {
         headers: { Authorization: `Bearer ${CLOVER_ACCESS_TOKEN}` }
-      });
+      })
       if (!resp.ok) {
-        console.error('⚠️  Clover fetch failed:', resp.status, await resp.text());
-        break;
+        console.error('⚠️  Clover fetch failed:', resp.status, await resp.text())
+        break
       }
 
-      const { elements = [] } = await resp.json();
-      if (!elements.length) break;
+      const { elements = [] } = await resp.json()
+      if (elements.length === 0) break
 
-      // 2) Only keep orders from the last 2 hours
-      const recent = elements.filter(o => o.createdTime >= twoHoursAgo);
+      // Only keep orders created in the last 2 hours
+      const recent = elements.filter(o => o.createdTime >= twoHoursAgo)
 
-      // 3) Process each new, unique order
       for (const o of recent) {
-        if (seenOrders.has(o.id)) continue;
-        seenOrders.add(o.id);
-        anyNew = true;
+        // Skip orders we've already processed
+        if (seenOrders.has(o.id)) continue
 
-        // ── Merge item states ───────────────────────────────
+        // Extract line-item names: either li.name or expanded li.item.name
         const cloverNames = (o.lineItems?.elements || [])
           .map(li => li.name || li.item?.name)
-          .filter(n => typeof n === 'string' && n.length > 0);
+          .filter(n => typeof n === 'string' && n.length > 0)
 
-        const col      = db.collection('ikds');
+        // If no items yet, defer processing until a later poll
+        if (cloverNames.length === 0) {
+          continue
+        }
+
+        // Now mark as seen so we don't re-process
+        seenOrders.add(o.id)
+        anyNew = true
+
+        // Merge with existing DB states
+        const col      = db.collection('ikds')
         const existing = await col.findOne(
           { orderId: o.id },
-          { projection: { items: 1, state: 1 } }
-        );
-        const savedItems = existing?.items || [];
-        const nameToState = new Map(savedItems.map(i => [i.name, i.state]));
-
-        // New items start as "new"
+          { projection: { items: 1 } }
+        )
+        const savedItems = existing?.items || []
+        const nameToState = new Map(savedItems.map(i => [i.name, i.state]))
         cloverNames.forEach(name => {
           if (!nameToState.has(name)) {
-            nameToState.set(name, 'new');
+            nameToState.set(name, 'new')
           }
-        });
-
-        // Final items list
+        })
         const finalItems = cloverNames.length
           ? Array.from(nameToState, ([name, state]) => ({ name, state }))
-          : savedItems;
+          : savedItems
 
-        // ── Upsert order document ───────────────────────────
-        const result = await col.updateOne(
+        // Upsert into MongoDB
+        await col.updateOne(
           { orderId: o.id },
           {
             $set: {
@@ -130,50 +134,47 @@ async function pollOnce() {
             }
           },
           { upsert: true }
-        );
+        )
 
-        // ── Emit Pusher event ──────────────────────────────
+        // Emit real-time event via Pusher
         await pusher.trigger('orders', 'order-updated', {
           orderId:   o.id,
           title:     o.title,
           items:     finalItems,
-          // if it's brand-new in the DB, let clients know state="new"
           state:     existing ? undefined : 'new',
           updatedAt: o.modifiedTime || o.updatedTime || o.createdTime
-        });
+        })
 
-        console.log(`→ Emitted new order ${o.id}`);
+        console.log(`→ Emitted new order ${o.id}`)
       }
 
-      // 4) Pagination break: fewer than limit OR last record older than 2h
+      // Stop paging if fewer than limit or last item older than 2h
       if (
         elements.length < limit ||
         elements[elements.length - 1].createdTime < twoHoursAgo
       ) {
-        break;
+        break
       }
-      offset += limit;
+      offset += limit
     }
 
     if (!anyNew) {
-      //console.log('— no new orders in the last 2 hours');
+      // no new orders this cycle
     }
   } catch (err) {
-    console.error('❌ Poller error:', err);
+    console.error('❌  Poller error:', err)
   }
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function start() {
-  await initDb();
-  console.log('🚀 Starting Clover poller (every 1s, last 2 h only)');
-  // Initial run
-  await pollOnce();
-  // Re-run every 1 second
-  setInterval(pollOnce, 1000);
+  await initDb()
+  console.log('🚀  Starting Clover poller (every 1s, last 2h only)')
+  await pollOnce()
+  setInterval(pollOnce, 1000)
 }
 
 start().catch(err => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+  console.error('Fatal error:', err)
+  process.exit(1)
+})
