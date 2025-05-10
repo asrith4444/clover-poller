@@ -27,7 +27,7 @@ if (
   !PUSHER_SECRET       ||
   !PUSHER_CLUSTER
 ) {
-  console.error('❌  Missing required environment variables. Check your .env file.')
+  console.error('❌ Missing required environment variables. Check your .env file.')
   process.exit(1)
 }
 
@@ -49,25 +49,25 @@ let db
 async function initDb() {
   await mongoClient.connect()
   db = mongoClient.db(MONGODB_DB)
-  console.log('✅  Connected to MongoDB (ikds collection)')
+  console.log('✅ Connected to MongoDB (ikds collection)')
 }
 
-// ── In‐memory Dedupe & Polling ────────────────────────────────────────────────
-// Track which orders we’ve fully processed
-const seenOrders = new Set()
+// ── Track Which *Items* We’ve Already Seen ────────────────────────────────────
+const seenItemsMap = new Map()
+//   Map<orderId, Set<lineItemId>>
 
+// ── Polling Loop ─────────────────────────────────────────────────────────────
 async function pollOnce() {
   const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000
   const limit       = 100
   let offset        = 0
-  let anyNew        = false
 
   try {
     while (true) {
-      // Fetch a page of orders, expanding both the container and each item’s details
+      // Expand only lineItems.name so we get both `li.id` and `li.name`
       const url =
         `${CLOVER_BASE_URL}/v3/merchants/${CLOVER_MERCHANT_ID}/orders` +
-        `?expand=lineItems%2ClineItems.item&limit=${limit}&offset=${offset}`
+        `?expand=lineItems.name&limit=${limit}&offset=${offset}`
 
       const resp = await fetch(url, {
         headers: { Authorization: `Bearer ${CLOVER_ACCESS_TOKEN}` }
@@ -80,28 +80,32 @@ async function pollOnce() {
       const { elements = [] } = await resp.json()
       if (elements.length === 0) break
 
-      // Only keep orders created in the last 2 hours
+      // Only look at orders created in the last two hours
       const recent = elements.filter(o => o.createdTime >= twoHoursAgo)
 
       for (const o of recent) {
-        // Skip orders we've already processed
-        if (seenOrders.has(o.id)) continue
+        const items = o.lineItems?.elements || []
+        if (items.length === 0) continue  // no lineItems yet
 
-        // Extract line-item names: either li.name or expanded li.item.name
-        const cloverNames = (o.lineItems?.elements || [])
-          .map(li => li.name || li.item?.name)
-          .filter(n => typeof n === 'string' && n.length > 0)
-
-        // If no items yet, defer processing until a later poll
-        if (cloverNames.length === 0) {
-          continue
+        // Get (or init) the seen-items set for this order
+        let seenSet = seenItemsMap.get(o.id)
+        if (!seenSet) {
+          seenSet = new Set()
+          seenItemsMap.set(o.id, seenSet)
         }
 
-        // Now mark as seen so we don't re-process
-        seenOrders.add(o.id)
-        anyNew = true
+        // Find any lineItems *this* poll that we haven't seen before
+        const newOnes = items.filter(li => !seenSet.has(li.id))
+        if (newOnes.length === 0) continue
 
-        // Merge with existing DB states
+        // Mark *all* current items as seen (so we don't re-emit duplicates)
+        items.forEach(li => seenSet.add(li.id))
+
+        // Merge states with existing DB record
+        const cloverNames = items
+          .map(li => li.name)
+          .filter(n => typeof n === 'string' && n.length > 0)
+
         const col      = db.collection('ikds')
         const existing = await col.findOne(
           { orderId: o.id },
@@ -114,11 +118,9 @@ async function pollOnce() {
             nameToState.set(name, 'new')
           }
         })
-        const finalItems = cloverNames.length
-          ? Array.from(nameToState, ([name, state]) => ({ name, state }))
-          : savedItems
+        const finalItems = Array.from(nameToState, ([name, state]) => ({ name, state }))
 
-        // Upsert into MongoDB
+        // Upsert the order document
         await col.updateOne(
           { orderId: o.id },
           {
@@ -136,19 +138,20 @@ async function pollOnce() {
           { upsert: true }
         )
 
-        // Emit real-time event via Pusher
+        // Emit the update to clients, noting exactly which items were new
         await pusher.trigger('orders', 'order-updated', {
           orderId:   o.id,
           title:     o.title,
           items:     finalItems,
+          newItems:  newOnes.map(li => li.name),
           state:     existing ? undefined : 'new',
           updatedAt: o.modifiedTime || o.updatedTime || o.createdTime
         })
 
-        console.log(`→ Emitted new order ${o.id}`)
+        console.log(`→ Order ${o.id} updated with new items: ${newOnes.map(li => li.name).join(', ')}`)
       }
 
-      // Stop paging if fewer than limit or last item older than 2h
+      // stop paging if we're done
       if (
         elements.length < limit ||
         elements[elements.length - 1].createdTime < twoHoursAgo
@@ -157,19 +160,15 @@ async function pollOnce() {
       }
       offset += limit
     }
-
-    if (!anyNew) {
-      // no new orders this cycle
-    }
   } catch (err) {
-    console.error('❌  Poller error:', err)
+    console.error('❌ Poller error:', err)
   }
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function start() {
   await initDb()
-  console.log('🚀  Starting Clover poller (every 1s, last 2h only)')
+  console.log('🚀 Starting Clover poller (every 1s, last 2h only)')
   await pollOnce()
   setInterval(pollOnce, 1000)
 }
