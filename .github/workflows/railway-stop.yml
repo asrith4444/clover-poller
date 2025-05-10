@@ -13,13 +13,7 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Railway Login
+      - name: Stop service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway login --ci
-
-      - name: Link to Railway Project
-        run: railway link --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
-
-      - name: Stop service
-        run: railway down
+        run: railway down --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
