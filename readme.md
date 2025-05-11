@@ -31,19 +31,25 @@ A lightweight Node.js script that periodically fetches new orders (and their lin
 	3.	Create a .env file alongside poller.js:
 
 # Clover API
-CLOVER_BASE_URL=https://apisandbox.dev.clover.com
-CLOVER_ACCESS_TOKEN=<your-clover-token>
-CLOVER_MERCHANT_ID=<your-merchant-id>
+CLOVER_BASE_URL=https://apisandbox.dev.clover.com[For production use https://api.clover.com
+
+CLOVER_ACCESS_TOKEN=#your-clover-token#
+
+CLOVER_MERCHANT_ID=#your-merchant-id#
 
 # MongoDB
-MONGODB_URI=<your-mongodb-connection-string>
-MONGODB_DB=<your-database-name>
+MONGODB_URI=#your-mongodb-connection-string#
+
+MONGODB_DB=#your-database-name#
 
 # Pusher
-PUSHER_APP_ID=<your-pusher-app-id>
-PUSHER_KEY=<your-pusher-key>
-PUSHER_SECRET=<your-pusher-secret>
-PUSHER_CLUSTER=<your-pusher-cluster>
+PUSHER_APP_ID=#your-pusher-app-id#
+
+PUSHER_KEY=#your-pusher-key#
+
+PUSHER_SECRET=#your-pusher-secret#
+
+PUSHER_CLUSTER=#your-pusher-cluster#
 
 
 
@@ -53,7 +59,7 @@ PUSHER_CLUSTER=<your-pusher-cluster>
 
 Run the poller:
 
-`node poller.js`
+```node poller.js```
 
 You should see logs like:
 
