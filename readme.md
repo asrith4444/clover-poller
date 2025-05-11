@@ -1,10 +1,10 @@
-Clover Poller
+# Clover Poller
 
 A lightweight Node.js script that periodically fetches new orders (and their line-items) from the Clover API, upserts them into a MongoDB collection, and emits real-time order-updated events via Pusher.
 
 ⸻
 
-🔍 Overview
+## 🔍 Overview
 	•	Fetch interval: configurable (defaults to every 1 second)
 	•	Time window: only considers orders created in the last 2 hours
 	•	Line-item tracking: tracks each line-item’s unique ID to handle duplicates, additions and deletions
@@ -13,7 +13,7 @@ A lightweight Node.js script that periodically fetches new orders (and their lin
 
 ⸻
 
-⚙️ Prerequisites
+## ⚙️ Prerequisites
 	•	Node.js v14 or later
 	•	A running MongoDB instance (Atlas, local, or hosted)
 	•	A Clover merchant account with a valid access token (sandbox or production)
@@ -21,11 +21,11 @@ A lightweight Node.js script that periodically fetches new orders (and their lin
 
 ⸻
 
-📦 Installation
+## 📦 Installation
 	1.	Copy poller.js into your project directory.
 	2.	Install dependencies:
 
-npm install node-fetch@2 pusher mongodb dotenv
+`npm install node-fetch@2 pusher mongodb dotenv`
 
 
 	3.	Create a .env file alongside poller.js:
@@ -53,7 +53,7 @@ PUSHER_CLUSTER=<your-pusher-cluster>
 
 Run the poller:
 
-node poller.js
+`node poller.js`
 
 You should see logs like:
 
