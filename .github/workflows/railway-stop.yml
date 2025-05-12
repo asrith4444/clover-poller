@@ -1,19 +1,32 @@
 name: ⏸️ Stop Clover Poller
 
 on:
+  # Manual trigger for instant testing:
+  workflow_dispatch:
+  # Scheduled at 05:00 UTC → 01:00 EDT
   schedule:
-    - cron: '1 5 * * *'   # 05:01 UTC = 01:01 EDT
+    - cron: '0 5 * * *'
 
 jobs:
   stop:
     runs-on: ubuntu-latest
+    # Make the token & project ID available to all steps
+    env:
+      RAILWAY_TOKEN:       ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID:  ${{ secrets.RAILWAY_PROJECT_ID }}
+
     steps:
+      # 1️⃣ Checkout your code so the CLI can link
       - uses: actions/checkout@v3
 
+      # 2️⃣ Install the Railway CLI
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # 3️⃣ Link this directory to your project
+      - name: Link to Railway project
+        run: railway link --project $RAILWAY_PROJECT_ID
+
+      # 4️⃣ Tear it down (skip confirmation) :contentReference[oaicite:0]{index=0}
       - name: Stop service
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway down --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: railway down -y

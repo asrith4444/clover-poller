@@ -1,22 +1,27 @@
 name: ▶️ Start Clover Poller
 
 on:
+  workflow_dispatch:
+  # Scheduled at 13:00 UTC → 09:00 EDT
   schedule:
-    - cron: '0 13 * * *'  # 13:00 UTC = 09:00 EDT daily
+    - cron: '0 13 * * *'
 
 jobs:
   start:
     runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN:       ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID:  ${{ secrets.RAILWAY_PROJECT_ID }}
+
     steps:
-      # 1. Checkout your repo (so the CLI can discover project settings)
       - uses: actions/checkout@v3
 
-      # 2. Install the Railway CLI
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      # 3. Start (deploy) the service
+      - name: Link to Railway project
+        run: railway link --project $RAILWAY_PROJECT_ID
+
+      # Deploy in “detached” mode (no live logs) :contentReference[oaicite:1]{index=1}
       - name: Start service
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --yes --projectId ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: railway up --detach
