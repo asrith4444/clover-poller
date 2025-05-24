@@ -4,6 +4,7 @@ const fetch           = require('node-fetch')  // v2.x
 const Pusher          = require('pusher')
 const { MongoClient } = require('mongodb')
 
+
 // ── Env & Validation ──────────────────────────────────────────────────────────
 const {
   CLOVER_BASE_URL     = 'https://apisandbox.dev.clover.com',
@@ -51,6 +52,8 @@ async function initDb() {
   db = mongoClient.db(MONGODB_DB)
   console.log('✅ Connected to MongoDB')
 }
+
+const ignoreItems = ['Bottled Water', 'Powerade', 'Powerade Big', 'Coke Soda','Mango Nectur']
 
 // ── Track Which *Line-Items* We’ve Already Seen ───────────────────────────────
 const seenItemsMap = new Map()  // Map<orderId, Set<lineItemId>>
@@ -113,13 +116,18 @@ async function pollOnce() {
         state: idToState.get(li.id) || 'new'
       }))
 
+      // Filter out ignored items
+      const filteredItems = finalItems.filter(li => !ignoreItems.includes(li.name))
+
+
+
       // 6) Upsert into MongoDB
       await col.updateOne(
         { orderId: o.id },
         {
           $set: {
             title:     o.title || '',
-            items:     finalItems,
+            items:     filteredItems,
             updatedAt: new Date(o.modifiedTime || o.updatedTime || o.createdTime)
           },
           $setOnInsert: {
